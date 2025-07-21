@@ -1,1 +1,3 @@
 ckpts/
+body_pose_model.pth
+GFPGAN\weights

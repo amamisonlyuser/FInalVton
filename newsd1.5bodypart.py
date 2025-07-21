@@ -83,7 +83,7 @@ def generate_mask_from_image(src_image_pil, target_width, target_height, parts_t
         # It's better to initialize it once at the start, similar to the SD pipeline.
         # For now, keep it here for demonstration, but consider moving to initialize_models.
         try:
-            mask_generator = HumanParsingMaskGenerator(ckpt_dir="./ckpts", device="cuda" if torch.cuda.is_available() else "cpu")
+            mask_generator = HumanParsingMaskGenerator()
             print("HumanParsingMaskGenerator initialized.")
         except Exception as e:
             print(f"Error initializing HumanParsingMaskGenerator: {e}")
@@ -265,7 +265,7 @@ def predict_inpaint(
         generator=generator,
         strength=denoise_strength,
     ).images
-    
+    model_parse = model_parse.resize((768, 1024))
     inpainted_image = inpainted_images[0]
     inpainted_image_resized = inpainted_image.resize((768, 1024))
     inpainted_image_resized.save("inpainted_image_resized.png")

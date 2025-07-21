@@ -9,7 +9,6 @@ from PIL import Image
 import random
 import gradio as gr
 from leffa_utils.utils import resize_and_center ,preserve_face_and_hair
-
 # --- Check for Dependencies and Import ---
 # Assuming 'leffa' and 'leffa_utils' are custom modules.
 # Ensure they are in Python's path or installed.
@@ -185,7 +184,65 @@ class LeffaPredictor(object):
         blurred_image = cv2.GaussianBlur(image_np, (blur_kernel_size, blur_kernel_size), 0)
         smoothed_image = image_np.copy()
         smoothed_image[boundary_mask != 0] = blurred_image[boundary_mask != 0]
-        return smoothed_image    
+        return smoothed_image 
+    def human_parser(self, src_image_pil):
+        """
+        Runs the human parsing model on a source image to get a label map.
+
+        Args:
+            src_image_pil (PIL.Image.Image): The input image.
+
+        Returns:
+            PIL.Image.Image: The resulting label map where each pixel value
+                             corresponds to a specific human part label.
+        """
+        # Resize and center the image to the model's expected input size
+        image = resize_and_center(src_image_pil, 768, 1024)
+        image_resized = image.resize((768, 1024)).convert("RGB")
+
+        print("[🧠] Running human parsing...")
+        label_map, _ = self.parsing(image_resized)
+        label_map.save("label_map.png") # Save the raw label map for debugging
+
+        return label_map
+
+    def extract_clothing_with_original_colors(self, src_image_pil):
+        """
+        Generates an RGB image showing only the clothing parts from the original image.
+        The background is white, and the clothing retains its original color.
+        Targets: upper_clothes, skirt, pants, dress, belt.
+
+        Args:
+            src_image_pil (PIL.Image.Image): The input image.
+
+        Returns:
+            PIL.Image.Image: An RGB image showing only the clothing on a white background.
+        """
+        print("[🎨] Extracting clothing with original colors...")
+        
+        # Ensure the source image is the correct size for pixel-perfect alignment
+        image_resized_pil = resize_and_center(src_image_pil, 768, 1024)
+        image_resized_np = np.array(image_resized_pil)
+
+        # Get the full-resolution label map
+        label_map_pil = self.human_parser(image_resized_pil)
+        label_map_np = np.array(label_map_pil)
+
+        # Define the labels for all clothing items
+        # Labels: 4:upper_clothes, 5:skirt, 6:pants, 7:dress, 8:belt
+        clothing_labels = [4, 5, 6, 7, 8]
+
+        # Create a boolean mask that is True for any clothing pixel
+        clothing_mask = np.isin(label_map_np, clothing_labels)
+
+        # Create a white background image with the same dimensions
+        output_image_np = np.full_like(image_resized_np, 255, dtype=np.uint8)
+
+        # Where the mask is True, copy the pixels from the original image
+        output_image_np[clothing_mask] = image_resized_np[clothing_mask]
+
+        print("[✅] Clothing extraction complete.")
+        return Image.fromarray(output_image_np, mode='RGB')
     def _leffa_predict_internal(
        self,
        src_image_pil,
@@ -241,7 +298,7 @@ class LeffaPredictor(object):
         # --- MODIFICATION: Crop Inputs for Efficient Inference ---
         print("Cropping images based on the combined mask...")
         src_image_cropped, bbox = refined_crop_and_pad(src_image, combined_mask_resized, padding=32)
-         
+        
         # Use the same bounding box to crop the mask and densepose map
         mask_cropped = combined_mask_resized.crop(bbox)
         densepose_cropped = densepose_resized.crop(bbox)
@@ -270,13 +327,15 @@ class LeffaPredictor(object):
         smoothed_image_np = predictor.smooth_boundaries(image_to_smooth_np)
         densepose_resized_image_cropped = Image.fromarray(cv2.cvtColor(smoothed_image_np, cv2.COLOR_BGR2RGB))
 
-        generated_image_np = cv2.cvtColor(np.array(ref_image_pil), cv2.COLOR_RGB2BGR)
+
+        ref_image_pil1 = self.extract_clothing_with_original_colors(ref_image_pil)
+        generated_image_np = cv2.cvtColor(np.array(ref_image_pil1), cv2.COLOR_RGB2BGR)
         enhanced_image_np = predictor.face_restorer.enhance_face(generated_image_np, weight=0.75)
         final_image1 = Image.fromarray(cv2.cvtColor(enhanced_image_np, cv2.COLOR_BGR2RGB))
         image_to_smooth_np = cv2.cvtColor(np.array(final_image1), cv2.COLOR_RGB2BGR)
         smoothed_image_np = predictor.smooth_boundaries(image_to_smooth_np)
         ref_image_pil_scalled = Image.fromarray(cv2.cvtColor(smoothed_image_np, cv2.COLOR_BGR2RGB))
-        
+       
         
         # Prepare data for the model using the CROPPED image
         transform = LeffaTransform()
